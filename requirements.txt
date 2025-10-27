@@ -1,0 +1,2 @@
+echo Flask==2.3.3 > requirements.txt
+echo PyPDF2==3.0.1 >> requirements.txt
