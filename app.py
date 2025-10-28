@@ -3,54 +3,55 @@ from datetime import datetime
 import re
 import tempfile
 import os
-import magic
 
 app = Flask(__name__)
 
 def detectar_tipo_arquivo(arquivo):
     """
-    Detecta se o arquivo é PDF, imagem ou texto
+    Detecta se o arquivo é PDF, imagem ou texto usando apenas a extensão
     """
     try:
-        # Verificar pelo nome do arquivo
         filename = arquivo.filename.lower()
         
-        # Se não tem extensão ou tem extensão de texto
-        if not '.' in filename or filename.endswith(('.txt', '.text', '.msg')):
-            return "texto"
-        
-        # Se tem extensão de imagem
-        if filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')):
+        # Verificar extensões de imagem
+        if any(filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.heic']):
             return "imagem"
+        
+        # Verificar extensões de texto
+        if any(filename.endswith(ext) for ext in ['.txt', '.text', '.doc', '.docx', '.rtf', '.msg']):
+            return "texto"
             
-        # Se tem extensão de PDF
+        # Verificar se é PDF
         if filename.endswith('.pdf'):
             return "pdf"
             
-        # Verificar pelo conteúdo do arquivo (usando python-magic)
-        conteudo = arquivo.read(1024)  # Ler primeiros 1024 bytes
-        arquivo.seek(0)  # Voltar ao início do arquivo
+        # Se não tem extensão ou extensão desconhecida, verificar pelo conteúdo
+        arquivo.seek(0)
+        primeiros_bytes = arquivo.read(1024)
+        arquivo.seek(0)
         
-        mime = magic.from_buffer(conteudo, mime=True)
-        
-        if mime.startswith('image/'):
-            return "imagem"
-        elif mime == 'application/pdf':
+        # Verificar por assinaturas de arquivo
+        if primeiros_bytes.startswith(b'%PDF'):
             return "pdf"
-        elif mime.startswith('text/'):
-            return "texto"
+        elif primeiros_bytes.startswith((b'\xFF\xD8\xFF', b'\x89PNG', b'GIF', b'BM')):  # JPEG, PNG, GIF, BMP
+            return "imagem"
         else:
-            return "desconhecido"
-            
+            # Se não reconheceu, assume que é texto baseado no conteúdo
+            try:
+                primeiros_bytes.decode('utf-8')
+                return "texto"
+            except:
+                return "desconhecido"
+                
     except Exception as e:
-        # Fallback: verificar pela extensão
+        # Fallback: verificar apenas pela extensão
         filename = arquivo.filename.lower()
         if filename.endswith('.pdf'):
             return "pdf"
         elif any(filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']):
             return "imagem"
         else:
-            return "desconhecido"
+            return "texto"
 
 def extrair_texto_pdf(file_path):
     """Extrai texto de PDF"""
@@ -158,7 +159,7 @@ def validar_comprovante():
                 'erro': 'Nenhum arquivo selecionado'
             }), 400
         
-        # DETECTAR TIPO DE ARQUIVO - NOVA VALIDAÇÃO
+        # DETECTAR TIPO DE ARQUIVO
         tipo_arquivo = detectar_tipo_arquivo(arquivo)
         
         if tipo_arquivo == "imagem":
@@ -170,7 +171,7 @@ def validar_comprovante():
         if tipo_arquivo == "texto":
             return jsonify({
                 'valido': False,
-                'erro': 'o arquivo e uma imagem'  # Retorna a mesma mensagem que você pediu
+                'erro': 'o arquivo e uma imagem'
             }), 200
         
         if tipo_arquivo != "pdf":
