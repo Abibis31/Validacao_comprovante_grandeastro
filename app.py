@@ -3,8 +3,54 @@ from datetime import datetime
 import re
 import tempfile
 import os
+import magic
 
 app = Flask(__name__)
+
+def detectar_tipo_arquivo(arquivo):
+    """
+    Detecta se o arquivo é PDF, imagem ou texto
+    """
+    try:
+        # Verificar pelo nome do arquivo
+        filename = arquivo.filename.lower()
+        
+        # Se não tem extensão ou tem extensão de texto
+        if not '.' in filename or filename.endswith(('.txt', '.text', '.msg')):
+            return "texto"
+        
+        # Se tem extensão de imagem
+        if filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')):
+            return "imagem"
+            
+        # Se tem extensão de PDF
+        if filename.endswith('.pdf'):
+            return "pdf"
+            
+        # Verificar pelo conteúdo do arquivo (usando python-magic)
+        conteudo = arquivo.read(1024)  # Ler primeiros 1024 bytes
+        arquivo.seek(0)  # Voltar ao início do arquivo
+        
+        mime = magic.from_buffer(conteudo, mime=True)
+        
+        if mime.startswith('image/'):
+            return "imagem"
+        elif mime == 'application/pdf':
+            return "pdf"
+        elif mime.startswith('text/'):
+            return "texto"
+        else:
+            return "desconhecido"
+            
+    except Exception as e:
+        # Fallback: verificar pela extensão
+        filename = arquivo.filename.lower()
+        if filename.endswith('.pdf'):
+            return "pdf"
+        elif any(filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']):
+            return "imagem"
+        else:
+            return "desconhecido"
 
 def extrair_texto_pdf(file_path):
     """Extrai texto de PDF"""
@@ -112,7 +158,22 @@ def validar_comprovante():
                 'erro': 'Nenhum arquivo selecionado'
             }), 400
         
-        if not arquivo.filename.lower().endswith('.pdf'):
+        # DETECTAR TIPO DE ARQUIVO - NOVA VALIDAÇÃO
+        tipo_arquivo = detectar_tipo_arquivo(arquivo)
+        
+        if tipo_arquivo == "imagem":
+            return jsonify({
+                'valido': False,
+                'erro': 'o arquivo e uma imagem'
+            }), 200
+        
+        if tipo_arquivo == "texto":
+            return jsonify({
+                'valido': False,
+                'erro': 'o arquivo e uma imagem'  # Retorna a mesma mensagem que você pediu
+            }), 200
+        
+        if tipo_arquivo != "pdf":
             return jsonify({
                 'valido': False,
                 'erro': 'Apenas arquivos PDF são aceitos'
@@ -179,5 +240,5 @@ def health_check():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"✅ API rodando na porta {port}")
+    print(f"API rodando na porta {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
