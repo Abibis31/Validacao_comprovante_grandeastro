@@ -51,17 +51,39 @@ def extrair_texto_pdf(file_path):
         return ""
 
 def encontrar_valor(texto):
-    """Encontra valor no texto e retorna como inteiro"""
-    padroes = [
-        r'r\$\s*(\d+[.,]\d{2})',
+    """Encontra valor no texto - VERSÃO MELHORADA"""
+    # Primeiro: procurar por padrões específicos de valor
+    padroes_prioritarios = [
         r'valor\s*[:\s]*r\$\s*(\d+[.,]\d{2})',
-        r'(\d+[.,]\d{2})\s*reais',
-        r'rs\s*(\d+[.,]\d{2})',
         r'total\s*[:\s]*r\$\s*(\d+[.,]\d{2})',
-        r'(\d+[.,]\d{2})',
+        r'r\$\s*(\d+[.,]\d{2})\s*\(valor',
+        r'pagamento\s*[:\s]*r\$\s*(\d+[.,]\d{2})',
+        r'valor\s*do\s*pagamento\s*[:\s]*r\$\s*(\d+[.,]\d{2})',
     ]
     
-    for padrao in padroes:
+    # Buscar primeiro nos padrões prioritários
+    for padrao in padroes_prioritarios:
+        encontrados = re.findall(padrao, texto, re.IGNORECASE)
+        for valor in encontrados:
+            try:
+                valor_str = valor.replace(',', '.')
+                valor_float = float(valor_str)
+                valor_inteiro = int(valor_float)
+                
+                if valor_inteiro in VALORES_ACEITOS:
+                    print(f"Valor PRIORITÁRIO encontrado: {valor_inteiro}")
+                    return valor_inteiro
+            except:
+                continue
+    
+    # Se não encontrou nos prioritários, buscar em padrões gerais
+    padroes_gerais = [
+        r'r\$\s*(\d+[.,]\d{2})',
+        r'(\d+[.,]\d{2})\s*reais',
+        r'rs\s*(\d+[.,]\d{2})',
+    ]
+    
+    for padrao in padroes_gerais:
         encontrados = re.findall(padrao, texto)
         for valor in encontrados:
             try:
@@ -70,17 +92,17 @@ def encontrar_valor(texto):
                 else:
                     valor_str = valor
                 
-                # Converter para float e depois para inteiro
                 valor_str = valor_str.replace(',', '.')
                 valor_float = float(valor_str)
                 valor_inteiro = int(valor_float)
                 
-                # Verificar se está na lista de valores aceitos
                 if valor_inteiro in VALORES_ACEITOS:
+                    print(f"Valor GERAL encontrado: {valor_inteiro}")
                     return valor_inteiro
-                    
             except:
                 continue
+    
+    print("Nenhum valor válido encontrado")
     return None
 
 def encontrar_data(texto):
