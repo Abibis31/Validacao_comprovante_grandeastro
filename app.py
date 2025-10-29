@@ -6,6 +6,17 @@ import os
 
 app = Flask(__name__)
 
+@app.route('/')
+def home():
+    return jsonify({
+        "status": "online", 
+        "message": "API de validacao de comprovantes",
+        "endpoints": {
+            "health": "/health",
+            "validar": "/validar"
+        }
+    })
+
 def detectar_tipo_arquivo(arquivo):
     """
     Detecta se o arquivo é PDF, imagem ou texto usando apenas a extensão
@@ -171,7 +182,7 @@ def validar_comprovante():
         if tipo_arquivo == "texto":
             return jsonify({
                 'valido': False,
-                'erro': 'o arquivo e uma imagem'
+                'erro': 'o arquivo e um texto'
             }), 200
         
         if tipo_arquivo != "pdf":
