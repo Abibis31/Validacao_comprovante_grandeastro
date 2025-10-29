@@ -46,17 +46,29 @@ def detectar_tipo_arquivo(arquivo):
         return "desconhecido"
 
 def extrair_texto_pdf(file_path):
-    """Extrai texto de PDF"""
+    """Extrai texto de PDF usando pdfplumber (mais eficiente)"""
     try:
-        import PyPDF2
-        with open(file_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            texto = ""
-            for pagina in reader.pages:
-                texto += pagina.extract_text()
+        import pdfplumber
+        texto = ""
+        with pdfplumber.open(file_path) as pdf:
+            for pagina in pdf.pages:
+                texto_pagina = pagina.extract_text()
+                if texto_pagina:
+                    texto += texto_pagina + " "
+        return texto.lower()
+    except Exception as e:
+        print(f"Erro ao extrair texto: {e}")
+        # Fallback para PyPDF2
+        try:
+            import PyPDF2
+            with open(file_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                texto = ""
+                for pagina in reader.pages:
+                    texto += pagina.extract_text() or ""
             return texto.lower()
-    except:
-        return ""
+        except:
+            return ""
 
 def encontrar_valor(texto):
     """Encontra valor no texto e retorna como inteiro"""
@@ -65,6 +77,7 @@ def encontrar_valor(texto):
         r'valor\s*[:\s]*r\$\s*(\d+[.,]\d{2})',
         r'(\d+[.,]\d{2})\s*reais',
         r'rs\s*(\d+[.,]\d{2})',
+        r'total\s*[:\s]*r\$\s*(\d+[.,]\d{2})',
         r'(\d+[.,]\d{2})',
     ]
     
@@ -86,37 +99,55 @@ def encontrar_valor(texto):
     return None
 
 def encontrar_data(texto):
-    """Encontra data no texto"""
+    """Encontra data no texto - versão melhorada"""
+    # Padrões de data mais flexíveis
     padroes = [
-        r'(\d{1,2}/\d{1,2}/\d{4})',
-        r'(\d{1,2}-\d{1,2}-\d{4})',
+        # DD/MM/AAAA
+        r'(\d{1,2})/(\d{1,2})/(\d{4})',
+        # DD-MM-AAAA
+        r'(\d{1,2})-(\d{1,2})-(\d{4})',
+        # DD.MM.AAAA
         r'(\d{1,2})\.(\d{1,2})\.(\d{4})',
+        # AAAA-MM-DD
         r'(\d{4})-(\d{1,2})-(\d{1,2})',
+        # DD/MM/AA (ano com 2 dígitos)
+        r'(\d{1,2})/(\d{1,2})/(\d{2})',
     ]
+    
+    datas_encontradas = []
     
     for padrao in padroes:
         encontrados = re.findall(padrao, texto)
-        for data in encontrados:
-            if len(data) == 3:
-                try:
-                    # Tentar diferentes formatos de data
-                    dia, mes, ano = int(data[0]), int(data[1]), int(data[2])
-                    # Verificar se a data é válida
-                    if 1 <= dia <= 31 and 1 <= mes <= 12 and ano >= 2020:
-                        return datetime(ano, mes, dia).date()
-                except:
-                    continue
+        for match in encontrados:
+            try:
+                if len(match) == 3:
+                    if len(match[2]) == 2:  # Ano com 2 dígitos
+                        ano = int("20" + match[2])  # Assume século 21
+                    else:
+                        ano = int(match[2])
+                    
+                    # Verificar formato da data
+                    if '/' in texto or '-' in texto or '.' in texto:
+                        # Formato DD/MM/AAAA ou DD-MM-AAAA
+                        dia = int(match[0])
+                        mes = int(match[1])
+                    else:
+                        # Formato AAAA-MM-DD
+                        dia = int(match[2])
+                        mes = int(match[1])
+                        ano = int(match[0])
+                    
+                    # Validar se é uma data real
+                    if 1 <= dia <= 31 and 1 <= mes <= 12 and 2020 <= ano <= 2030:
+                        data_obj = datetime(ano, mes, dia).date()
+                        datas_encontradas.append(data_obj)
+                        
+            except:
+                continue
     
-    # Procurar por datas no formato brasileiro
-    padrao_br = r'(\d{1,2})/(\d{1,2})/(\d{4})'
-    encontrados_br = re.findall(padrao_br, texto)
-    for dia, mes, ano in encontrados_br:
-        try:
-            dia_i, mes_i, ano_i = int(dia), int(mes), int(ano)
-            if 1 <= dia_i <= 31 and 1 <= mes_i <= 12:
-                return datetime(ano_i, mes_i, dia_i).date()
-        except:
-            continue
+    # Retornar a data mais recente encontrada
+    if datas_encontradas:
+        return max(datas_encontradas)
     
     return None
 
@@ -176,6 +207,12 @@ def validar_comprovante():
         except:
             pass
         
+        # DEBUG: Mostrar o que foi encontrado
+        print(f"Texto extraído: {texto[:500]}...")
+        print(f"Valor encontrado: {valor_encontrado}")
+        print(f"Data encontrada: {data_encontrada}")
+        print(f"Data hoje: {data_hoje}")
+        
         # VALIDAÇÕES SIMPLIFICADAS
         if valor_encontrado is None:
             return jsonify({
@@ -196,7 +233,7 @@ def validar_comprovante():
             return jsonify({
                 'sucesso': False,
                 'valor': None,
-                'mensagem': 'Comprovante não é de hoje'
+                'mensagem': f'Comprovante não é de hoje (data: {data_encontrada})'
             }), 200
         
         # Tudo certo - retorna o valor inteiro
@@ -210,7 +247,7 @@ def validar_comprovante():
         return jsonify({
             'sucesso': False,
             'valor': None,
-            'mensagem': 'Erro ao processar comprovante'
+            'mensagem': f'Erro ao processar comprovante: {str(e)}'
         }), 500
 
 @app.route('/health', methods=['GET'])
