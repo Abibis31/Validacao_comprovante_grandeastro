@@ -10,59 +10,40 @@ app = Flask(__name__)
 def home():
     return jsonify({
         "status": "online", 
-        "message": "API de validacao de comprovantes",
-        "endpoints": {
-            "health": "/health",
-            "validar": "/validar"
-        }
+        "message": "API de validacao de comprovantes para Manny Chat",
+        "uso": "Envie um PDF com comprovante via POST /validar"
     })
 
 def detectar_tipo_arquivo(arquivo):
     """
-    Detecta se o arquivo é PDF, imagem ou texto usando apenas a extensão
+    Detecta se o arquivo é PDF, imagem ou texto
     """
     try:
         filename = arquivo.filename.lower()
         
         # Verificar extensões de imagem
-        if any(filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.heic']):
+        extensoes_imagem = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.heic', '.tiff']
+        if any(filename.endswith(ext) for ext in extensoes_imagem):
             return "imagem"
         
-        # Verificar extensões de texto
-        if any(filename.endswith(ext) for ext in ['.txt', '.text', '.doc', '.docx', '.rtf', '.msg']):
-            return "texto"
-            
         # Verificar se é PDF
         if filename.endswith('.pdf'):
             return "pdf"
             
-        # Se não tem extensão ou extensão desconhecida, verificar pelo conteúdo
+        # Verificação por conteúdo
         arquivo.seek(0)
         primeiros_bytes = arquivo.read(1024)
         arquivo.seek(0)
         
-        # Verificar por assinaturas de arquivo
         if primeiros_bytes.startswith(b'%PDF'):
             return "pdf"
-        elif primeiros_bytes.startswith((b'\xFF\xD8\xFF', b'\x89PNG', b'GIF', b'BM')):  # JPEG, PNG, GIF, BMP
+        elif primeiros_bytes.startswith((b'\xFF\xD8\xFF', b'\x89PNG', b'GIF', b'BM')):
             return "imagem"
         else:
-            # Se não reconheceu, assume que é texto baseado no conteúdo
-            try:
-                primeiros_bytes.decode('utf-8')
-                return "texto"
-            except:
-                return "desconhecido"
+            return "outro"
                 
-    except Exception as e:
-        # Fallback: verificar apenas pela extensão
-        filename = arquivo.filename.lower()
-        if filename.endswith('.pdf'):
-            return "pdf"
-        elif any(filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']):
-            return "imagem"
-        else:
-            return "texto"
+    except Exception:
+        return "desconhecido"
 
 def extrair_texto_pdf(file_path):
     """Extrai texto de PDF"""
@@ -78,11 +59,13 @@ def extrair_texto_pdf(file_path):
         return ""
 
 def encontrar_valor(texto):
-    """Encontra valor no texto"""
+    """Encontra valor no texto e retorna como inteiro"""
     padroes = [
         r'r\$\s*(\d+[.,]\d{2})',
         r'valor\s*[:\s]*r\$\s*(\d+[.,]\d{2})',
         r'(\d+[.,]\d{2})\s*reais',
+        r'rs\s*(\d+[.,]\d{2})',
+        r'(\d+[.,]\d{2})',
     ]
     
     for padrao in padroes:
@@ -94,23 +77,21 @@ def encontrar_valor(texto):
                 else:
                     valor_str = valor
                 
+                # Converter para float e depois para inteiro (remove centavos)
                 valor_str = valor_str.replace(',', '.')
-                return float(valor_str)
+                valor_float = float(valor_str)
+                return int(valor_float)  # Retorna apenas a parte inteira
             except:
                 continue
     return None
 
 def encontrar_data(texto):
     """Encontra data no texto"""
-    meses = {
-        'jan': 1, 'fev': 2, 'mar': 3, 'abr': 4, 'mai': 5, 'jun': 6,
-        'jul': 7, 'ago': 8, 'set': 9, 'out': 10, 'nov': 11, 'dez': 12
-    }
-    
     padroes = [
         r'(\d{1,2}/\d{1,2}/\d{4})',
         r'(\d{1,2}-\d{1,2}-\d{4})',
-        r'(\d{1,2})\s*(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\s*(\d{4})',
+        r'(\d{1,2})\.(\d{1,2})\.(\d{4})',
+        r'(\d{4})-(\d{1,2})-(\d{1,2})',
     ]
     
     for padrao in padroes:
@@ -118,22 +99,25 @@ def encontrar_data(texto):
         for data in encontrados:
             if len(data) == 3:
                 try:
-                    dia = int(data[0])
-                    mes_abrev = data[1].lower()
-                    ano = int(data[2])
-                    
-                    if mes_abrev in meses:
-                        mes = meses[mes_abrev]
+                    # Tentar diferentes formatos de data
+                    dia, mes, ano = int(data[0]), int(data[1]), int(data[2])
+                    # Verificar se a data é válida
+                    if 1 <= dia <= 31 and 1 <= mes <= 12 and ano >= 2020:
                         return datetime(ano, mes, dia).date()
                 except:
                     continue
-            else:
-                data_str = data[0] if isinstance(data, tuple) else data
-                for formato in ['%d/%m/%Y', '%d-%m-%Y']:
-                    try:
-                        return datetime.strptime(data_str, formato).date()
-                    except:
-                        continue
+    
+    # Procurar por datas no formato brasileiro
+    padrao_br = r'(\d{1,2})/(\d{1,2})/(\d{4})'
+    encontrados_br = re.findall(padrao_br, texto)
+    for dia, mes, ano in encontrados_br:
+        try:
+            dia_i, mes_i, ano_i = int(dia), int(mes), int(ano)
+            if 1 <= dia_i <= 31 and 1 <= mes_i <= 12:
+                return datetime(ano_i, mes_i, dia_i).date()
+        except:
+            continue
+    
     return None
 
 @app.route('/validar', methods=['POST'])
@@ -142,54 +126,38 @@ def validar_comprovante():
         # Verificar se arquivo foi enviado
         if 'file' not in request.files:
             return jsonify({
-                'valido': False,
-                'erro': 'Nenhum arquivo enviado'
+                'sucesso': False,
+                'valor': None,
+                'mensagem': 'Nenhum arquivo enviado'
             }), 400
         
         arquivo = request.files['file']
-        valor_esperado = request.form.get('valor_esperado')
-        
-        if not valor_esperado:
-            return jsonify({
-                'valido': False,
-                'erro': 'Valor esperado não informado'
-            }), 400
-        
-        # Converter valor para float
-        try:
-            valor_esperado = float(valor_esperado)
-        except:
-            return jsonify({
-                'valido': False,
-                'erro': 'Valor esperado deve ser um número'
-            }), 400
         
         if arquivo.filename == '':
             return jsonify({
-                'valido': False,
-                'erro': 'Nenhum arquivo selecionado'
+                'sucesso': False,
+                'valor': None,
+                'mensagem': 'Nenhum arquivo selecionado'
             }), 400
         
         # DETECTAR TIPO DE ARQUIVO
         tipo_arquivo = detectar_tipo_arquivo(arquivo)
         
+        # Se for imagem, retorna falso imediatamente
         if tipo_arquivo == "imagem":
             return jsonify({
-                'valido': False,
-                'erro': 'o arquivo e uma imagem'
+                'sucesso': False,
+                'valor': None,
+                'mensagem': 'Arquivo de imagem não é aceito'
             }), 200
         
-        if tipo_arquivo == "texto":
-            return jsonify({
-                'valido': False,
-                'erro': 'o arquivo e um texto'
-            }), 200
-        
+        # Se não for PDF, retorna falso
         if tipo_arquivo != "pdf":
             return jsonify({
-                'valido': False,
-                'erro': 'Apenas arquivos PDF são aceitos'
-            }), 400
+                'sucesso': False,
+                'valor': None,
+                'mensagem': 'Apenas arquivos PDF são aceitos'
+            }), 200
         
         # Salvar arquivo temporariamente
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
@@ -208,42 +176,41 @@ def validar_comprovante():
         except:
             pass
         
-        # VALIDAÇÕES
+        # VALIDAÇÕES SIMPLIFICADAS
         if valor_encontrado is None:
             return jsonify({
-                'valido': False,
-                'erro': 'Não foi possível encontrar o valor no comprovante'
+                'sucesso': False,
+                'valor': None,
+                'mensagem': 'Não foi possível encontrar o valor no comprovante'
             }), 200
         
         if data_encontrada is None:
             return jsonify({
-                'valido': False,
-                'erro': 'Não foi possível encontrar a data no comprovante'
+                'sucesso': False,
+                'valor': None,
+                'mensagem': 'Não foi possível encontrar a data no comprovante'
             }), 200
         
-        # Verificar valor
-        if valor_encontrado != valor_esperado:
-            return jsonify({
-                'valido': False,
-                'erro': 'Valor incorreto'
-            }), 200
-        
-        # Verificar data
+        # Verificar data - deve ser de hoje
         if data_encontrada != data_hoje:
             return jsonify({
-                'valido': False,
-                'erro': 'Data incorreta'
+                'sucesso': False,
+                'valor': None,
+                'mensagem': 'Comprovante não é de hoje'
             }), 200
         
-        # Tudo certo
+        # Tudo certo - retorna o valor inteiro
         return jsonify({
-            'valido': True
+            'sucesso': True,
+            'valor': valor_encontrado,
+            'mensagem': f'Comprovante válido no valor de R$ {valor_encontrado},00'
         }), 200
         
     except Exception as e:
         return jsonify({
-            'valido': False,
-            'erro': 'Erro ao processar comprovante'
+            'sucesso': False,
+            'valor': None,
+            'mensagem': 'Erro ao processar comprovante'
         }), 500
 
 @app.route('/health', methods=['GET'])
@@ -252,5 +219,5 @@ def health_check():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"API rodando na porta {port}")
+    print(f"API Manny Chat rodando na porta {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
