@@ -84,8 +84,22 @@ def encontrar_valor(texto):
     return None
 
 def encontrar_data(texto):
-    """Encontra data no texto"""
+    """Encontra data no texto - PORTUGUÊS e INGLÊS"""
+    meses = {
+        # Português
+        'jan': 1, 'fev': 2, 'mar': 3, 'abr': 4, 'mai': 5, 'jun': 6,
+        'jul': 7, 'ago': 8, 'set': 9, 'out': 10, 'nov': 11, 'dez': 12,
+        'janeiro': 1, 'fevereiro': 2, 'março': 3, 'abril': 4, 'maio': 5, 'junho': 6,
+        'julho': 7, 'agosto': 8, 'setembro': 9, 'outubro': 10, 'novembro': 11, 'dezembro': 12,
+        # Inglês
+        'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
+        'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12
+    }
+    
     padroes = [
+        # Formato "17 OUT 2025" ou "17 OCT 2025"
+        r'(\d{1,2})\s*(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez|janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|january|february|march|april|may|june|july|august|september|october|november|december)\s*(\d{4})',
+        # Formatos numéricos
         r'(\d{1,2})/(\d{1,2})/(\d{4})',
         r'(\d{1,2})-(\d{1,2})-(\d{4})',
         r'(\d{1,2})\.(\d{1,2})\.(\d{4})',
@@ -94,22 +108,31 @@ def encontrar_data(texto):
     ]
     
     for padrao in padroes:
-        encontrados = re.findall(padrao, texto)
+        encontrados = re.findall(padrao, texto, re.IGNORECASE)
         for match in encontrados:
             try:
                 if len(match) == 3:
-                    if len(match[2]) == 2:
-                        ano = int("20" + match[2])
-                    else:
-                        ano = int(match[2])
-                    
                     dia = int(match[0])
-                    mes = int(match[1])
+                    mes_str = match[1].lower()
+                    ano = int(match[2])
                     
+                    # Se o mês for texto, converter para número
+                    if mes_str in meses:
+                        mes = meses[mes_str]
+                    else:
+                        # Tentar converter para número se for string numérica
+                        mes = int(mes_str)
+                    
+                    # Validar se é uma data real
                     if 1 <= dia <= 31 and 1 <= mes <= 12 and 2020 <= ano <= 2030:
-                        return datetime(ano, mes, dia).date()
-            except:
+                        data_encontrada = datetime(ano, mes, dia).date()
+                        print(f"Data detectada: {dia}/{mes}/{ano}")
+                        return data_encontrada
+            except Exception as e:
+                print(f"Erro ao processar data {match}: {e}")
                 continue
+    
+    print("Nenhuma data válida encontrada no texto")
     return None
 
 @app.route('/validar', methods=['POST'])
