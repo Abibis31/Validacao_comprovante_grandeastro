@@ -3,6 +3,7 @@ from datetime import datetime
 import re
 import tempfile
 import os
+import requests
 
 app = Flask(__name__)
 
@@ -17,23 +18,15 @@ def home():
         "valores_aceitos": VALORES_ACEITOS
     })
 
-def detectar_tipo_arquivo(arquivo):
-    """Detecta se o arquivo é PDF ou imagem"""
+def baixar_arquivo(url):
+    """Baixa arquivo da URL"""
     try:
-        filename = arquivo.filename.lower()
-        
-        # Verificar extensões de imagem
-        extensoes_imagem = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.heic', '.tiff']
-        if any(filename.endswith(ext) for ext in extensoes_imagem):
-            return "imagem"
-        
-        # Verificar se é PDF
-        if filename.endswith('.pdf'):
-            return "pdf"
-            
-        return "outro"
-    except Exception:
-        return "desconhecido"
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response.content
+    except Exception as e:
+        print(f"Erro ao baixar arquivo: {e}")
+        return None
 
 def extrair_texto_pdf(file_path):
     """Extrai texto de PDF usando pdfplumber"""
@@ -160,29 +153,28 @@ def encontrar_data(texto):
 @app.route('/validar', methods=['POST'])
 def validar_comprovante():
     try:
-        # Verificar se arquivo foi enviado
-        if 'file' not in request.files:
+        # Receber JSON com URL do arquivo
+        data = request.get_json()
+        
+        if not data or 'file_url' not in data:
             return jsonify(False), 200
         
-        arquivo = request.files['file']
+        file_url = data['file_url']
         
-        if arquivo.filename == '':
+        if not file_url:
             return jsonify(False), 200
         
-        # DETECTAR TIPO DE ARQUIVO
-        tipo_arquivo = detectar_tipo_arquivo(arquivo)
+        print(f"Baixando arquivo da URL: {file_url}")
         
-        # Se for imagem, retorna false imediatamente
-        if tipo_arquivo == "imagem":
-            return jsonify(False), 200
+        # Baixar arquivo da URL
+        file_content = baixar_arquivo(file_url)
         
-        # Se não for PDF, retorna false
-        if tipo_arquivo != "pdf":
+        if file_content is None:
             return jsonify(False), 200
         
         # Salvar arquivo temporariamente
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-            arquivo.save(temp_file.name)
+            temp_file.write(file_content)
             caminho_arquivo = temp_file.name
         
         # Processar comprovante
